@@ -2,341 +2,370 @@ from analisador_lexico import Lexico, Token, ErroLexico
 from analisador_sintatico_slr import SLR
 
 class ErroSemantico(Exception):
-    """Exceção para erros semânticos"""
     pass
 
+
 class Simbolo:
-    """Representa um símbolo na tabela de símbolos"""
     def __init__(self, nome, tipo, categoria, escopo, linha=0, params=None, inicializada=False):
         self.nome = nome
-        self.tipo = tipo  # 'int', 'void'
-        self.categoria = categoria  # 'variavel', 'funcao', 'parametro'
+        self.tipo = tipo
+        self.categoria = categoria
         self.escopo = escopo
         self.linha = linha
-        self.params = params if params else []
         self.inicializada = inicializada
+        
+        # params vem vazio? cria lista
+        if params is None:
+            self.params = []
+        else:
+            self.params = params
+
 
 class TabelaSimbolos:
-    """Gerencia escopos e símbolos"""
     def __init__(self):
-        self.simbolos = {}  # {nome: Simbolo}
+        self.simbolos = {}  # chave: "escopo:nome"
         self.escopo_atual = 'global'
-    
+
+    # insere ou dá erro se já existir
     def inserir(self, simbolo):
-        """Insere símbolo"""
-        chave = f"{simbolo.escopo}:{simbolo.nome}"
+        chave = self.escopo_atual + ":" + simbolo.nome
         if chave in self.simbolos:
-            raise ErroSemantico(
-                f"Linha {simbolo.linha}: '{simbolo.nome}' já declarado no escopo '{simbolo.escopo}'"
-            )
+            erro = "Linha " + str(simbolo.linha) + ": '" + simbolo.nome + "' já declarado"
+            raise ErroSemantico(erro)
         self.simbolos[chave] = simbolo
-    
+
+    # busca no escopo atual, se não achar tenta no global
     def buscar(self, nome, escopo=None):
-        """Busca símbolo no escopo atual ou global"""
         if escopo is None:
             escopo = self.escopo_atual
         
-        # Busca no escopo atual
-        chave = f"{escopo}:{nome}"
+        chave = escopo + ":" + nome
         if chave in self.simbolos:
             return self.simbolos[chave]
         
-        # Busca no global
         if escopo != 'global':
-            chave = f"global:{nome}"
-            if chave in self.simbolos:
-                return self.simbolos[chave]
+            chave_global = "global:" + nome
+            if chave_global in self.simbolos:
+                return self.simbolos[chave_global]
         
         return None
-    
+
+    # imprime a tabela bonitinha
     def imprimir(self):
-        """Imprime a tabela de símbolos"""
         print("\n" + "=" * 80)
         print("TABELA DE SÍMBOLOS")
         print("=" * 80)
+
+        grupos_escopo = {}
         
-        # Agrupa por escopo
-        escopos = {}
-        for chave, sim in self.simbolos.items():
-            if sim.escopo not in escopos:
-                escopos[sim.escopo] = []
-            escopos[sim.escopo].append(sim)
+        for chave in self.simbolos:
+            simbolo = self.simbolos[chave]
+            escopo_nome = simbolo.escopo
+            
+            if escopo_nome not in grupos_escopo:
+                grupos_escopo[escopo_nome] = []
+            
+            grupos_escopo[escopo_nome].append(simbolo)
         
-        for escopo, simbolos in escopos.items():
-            print(f"\nEscopo: {escopo}")
-            print(f"{'Nome':<15} {'Tipo':<10} {'Categoria':<12} {'Linha':<6} {'Inic.':<6} {'Params'}")
+        for escopo in grupos_escopo:
+            lista_simbolos = grupos_escopo[escopo]
+            print("\nEscopo: " + escopo)
+            print("Nome            Tipo       Cat.         Linha  Ini?   Params")
             print("-" * 80)
-            for sim in simbolos:
-                params_str = ', '.join(sim.params) if sim.params else '-'
-                inic = 'Sim' if sim.inicializada else 'Não'
-                print(f"{sim.nome:<15} {sim.tipo:<10} {sim.categoria:<12} {sim.linha:<6} {inic:<6} {params_str}")
+            
+            for simbolo in lista_simbolos:
+                # junta os params com vírgula
+                if len(simbolo.params) > 0:
+                    params_texto = ""
+                    contador = 0
+                    while contador < len(simbolo.params):
+                        if contador > 0:
+                            params_texto = params_texto + ", "
+                        params_texto = params_texto + simbolo.params[contador]
+                        contador = contador + 1
+                else:
+                    params_texto = "-"
+                
+                # sim ou não
+                if simbolo.inicializada:
+                    ini_texto = "Sim"
+                else:
+                    ini_texto = "Não"
+                
+                linha_str = str(simbolo.linha)
+                
+                print("%-15s %-10s %-12s %-6s %-5s %s" % 
+                      (simbolo.nome, simbolo.tipo, simbolo.categoria, 
+                       linha_str, ini_texto, params_texto))
+
 
 class AnalisadorSemantico:
-    """Analisador semântico simplificado"""
-    
     def __init__(self):
         self.tabela = TabelaSimbolos()
         self.tokens = []
         self.erros = []
         self.avisos = []
-        self.escopo_atual = 'global'
-    
+
+    # roda a análise toda
     def analisar(self, tokens):
-        """Executa análise semântica"""
         self.tokens = tokens
         self.erros = []
         self.avisos = []
-        
+
         print("\n" + "=" * 80)
         print("ANÁLISE SEMÂNTICA")
         print("=" * 80)
-        
+
         try:
-            # Processa tokens sequencialmente
             self.processar_tokens()
-            
-            # Imprime tabela
             self.tabela.imprimir()
-            
-            # Mostra avisos
-            if self.avisos:
+
+            # mostra avisos
+            if len(self.avisos) > 0:
                 print("\n" + "=" * 80)
                 print("AVISOS")
                 print("=" * 80)
                 for aviso in self.avisos:
-                    print(f"  {aviso}")
-            
-            # Mostra erros
-            if self.erros:
+                    print("  " + aviso)
+
+            # mostra erros
+            if len(self.erros) > 0:
                 print("\n" + "=" * 80)
-                print("ERROS SEMÂNTICOS")
+                print("ERROS")
                 print("=" * 80)
                 for erro in self.erros:
-                    print(f" {erro}")
+                    print("  " + erro)
                 return False
             else:
                 print("\n" + "=" * 80)
-                print(" ANÁLISE SEMÂNTICA CONCLUÍDA SEM ERROS")
+                print(" SEM ERROS")
                 print("=" * 80)
                 return True
-                
         except ErroSemantico as e:
             self.erros.append(str(e))
             return False
-    
+
+    # passa por todos os tokens procurando var, fun, uso de id
     def processar_tokens(self):
-        """Processa todos os tokens"""
-        i = 0
-        while i < len(self.tokens):
-            token = self.tokens[i]
-            
-            # Declaração de variável: var id;
-            if token.tipo == 'var' and i + 2 < len(self.tokens):
-                if self.tokens[i + 1].tipo == 'id' and self.tokens[i + 2].tipo == 'pv':
-                    nome = self.tokens[i + 1].lexema
-                    linha = self.tokens[i + 1].pos
-                    try:
-                        sim = Simbolo(nome, 'int', 'variavel', self.escopo_atual, linha)
-                        self.tabela.inserir(sim)
-                    except ErroSemantico as e:
-                        self.erros.append(str(e))
-                    i += 3
-                    continue
-            
-            # Declaração de função: fun id (params) { ... }
-            if token.tipo == 'fun' and i + 1 < len(self.tokens):
-                if self.tokens[i + 1].tipo == 'id':
-                    i = self.processar_funcao(i)
-                    continue
-            
-            # Uso de identificador
+        indice = 0
+        while indice < len(self.tokens):
+            token = self.tokens[indice]
+
+            # var x;
+            if token.tipo == 'var':
+                if indice + 2 < len(self.tokens):
+                    proximo = self.tokens[indice + 1]
+                    depois = self.tokens[indice + 2]
+                    if proximo.tipo == 'id' and depois.tipo == 'pv':
+                        nome = proximo.lexema
+                        linha = proximo.pos
+                        try:
+                            sim = Simbolo(nome, 'int', 'variavel', self.tabela.escopo_atual, linha)
+                            self.tabela.inserir(sim)
+                        except ErroSemantico as e:
+                            self.erros.append(str(e))
+                        indice = indice + 3
+                        continue
+
+            # fun soma(a, b)
+            if token.tipo == 'fun':
+                if indice + 1 < len(self.tokens):
+                    proximo = self.tokens[indice + 1]
+                    if proximo.tipo == 'id':
+                        indice = self.processar_funcao(indice)
+                        continue
+
+            # uso de variável
             if token.tipo == 'id':
-                self.validar_uso_id(i)
-            
-            # Validações de operações
+                self.validar_uso_id(indice)
+
+            # + - * / → não pode usar função
             if token.tipo in ['mais', 'menos', 'mult', 'div']:
-                self.validar_operacao(i)
-            
-            i += 1
-    
-    def processar_funcao(self, i):
-        """Processa declaração de função e seu corpo"""
-        nome_func = self.tokens[i + 1].lexema
-        linha = self.tokens[i + 1].pos
-        
-        # Coleta parâmetros
-        params = []
-        j = i + 3  # Pula 'fun', 'id', '('
-        while j < len(self.tokens) and self.tokens[j].tipo != 'fp':
-            if self.tokens[j].tipo == 'id':
-                params.append(self.tokens[j].lexema)
-            j += 1
-        
-        # Insere função no global
-        self.escopo_atual = 'global'
+                self.validar_operacao(indice)
+
+            indice = indice + 1
+
+    # processa função inteira: params, escopo, corpo
+    def processar_funcao(self, indice_inicio):
+        nome_funcao = self.tokens[indice_inicio + 1].lexema
+        linha = self.tokens[indice_inicio + 1].pos
+        parametros = []
+
+        # pega os params entre ( e )
+        j = indice_inicio + 3
+        while j < len(self.tokens):
+            token_atual = self.tokens[j]
+            if token_atual.tipo == 'fp':
+                break
+            if token_atual.tipo == 'id':
+                parametros.append(token_atual.lexema)
+            j = j + 1
+
+        # função vai pro global
         self.tabela.escopo_atual = 'global'
         try:
-            sim = Simbolo(nome_func, 'void', 'funcao', 'global', linha, params)
+            sim = Simbolo(nome_funcao, 'void', 'funcao', 'global', linha, parametros)
             self.tabela.inserir(sim)
         except ErroSemantico as e:
             self.erros.append(str(e))
-        
-        # Entra no escopo da função
-        self.escopo_atual = nome_func
-        self.tabela.escopo_atual = nome_func
-        
-        # Insere parâmetros
-        for param in params:
+
+        # entra no escopo da função
+        self.tabela.escopo_atual = nome_funcao
+
+        # params já vêm inicializados
+        for param in parametros:
             try:
-                param_sim = Simbolo(param, 'int', 'parametro', nome_func, linha, inicializada=True)
-                self.tabela.inserir(param_sim)
+                sim = Simbolo(param, 'int', 'parametro', nome_funcao, linha, None, True)
+                self.tabela.inserir(sim)
             except ErroSemantico as e:
                 self.erros.append(str(e))
-        
-        # Procura o abre bloco e processa até o fecha bloco
-        k = j + 1  # Depois do ')'
-        nivel = 0
-        encontrou_ab = False
-        
+
+        # corpo: conta { e }
+        k = j + 1
+        nivel_bloco = 0
+        entrou_no_bloco = False
         while k < len(self.tokens):
-            if self.tokens[k].tipo == 'ab':
-                nivel += 1
-                encontrou_ab = True
-            elif self.tokens[k].tipo == 'fb':
-                nivel -= 1
-                if nivel == 0 and encontrou_ab:
-                    # Saiu da função
-                    self.escopo_atual = 'global'
+            token = self.tokens[k]
+
+            if token.tipo == 'ab':
+                nivel_bloco = nivel_bloco + 1
+                entrou_no_bloco = True
+            elif token.tipo == 'fb':
+                nivel_bloco = nivel_bloco - 1
+                if nivel_bloco == 0 and entrou_no_bloco:
                     self.tabela.escopo_atual = 'global'
                     return k
-            
-            # Processa tokens dentro da função (MANTÉM O ESCOPO)
-            # Declaração de variável dentro da função
-            if self.tokens[k].tipo == 'var' and k + 2 < len(self.tokens):
-                if self.tokens[k + 1].tipo == 'id' and self.tokens[k + 2].tipo == 'pv':
-                    nome_var = self.tokens[k + 1].lexema
-                    linha_var = self.tokens[k + 1].pos
+
+            # var dentro da função
+            if token.tipo == 'var' and k + 2 < len(self.tokens):
+                if self.tokens[k+1].tipo == 'id' and self.tokens[k+2].tipo == 'pv':
+                    nome_var = self.tokens[k+1].lexema
+                    linha_var = self.tokens[k+1].pos
                     try:
-                        var_sim = Simbolo(nome_var, 'int', 'variavel', nome_func, linha_var)
-                        self.tabela.inserir(var_sim)
+                        sim = Simbolo(nome_var, 'int', 'variavel', nome_funcao, linha_var)
+                        self.tabela.inserir(sim)
                     except ErroSemantico as e:
                         self.erros.append(str(e))
-            
-            k += 1
-        
-        # Se chegou aqui, volta ao global
-        self.escopo_atual = 'global'
+            k = k + 1
+
         self.tabela.escopo_atual = 'global'
-        return k if k < len(self.tokens) else len(self.tokens) - 1
-    
-    def validar_uso_id(self, i):
-        """Valida uso de identificador"""
-        token = self.tokens[i]
+        if k < len(self.tokens):
+            return k
+        else:
+            return len(self.tokens) - 1
+
+    # verifica se variável foi declarada, inicializada, etc
+    def validar_uso_id(self, indice):
+        token = self.tokens[indice]
         nome = token.lexema
         linha = token.pos
-        
-        # Ignora declarações
-        if i > 0 and self.tokens[i - 1].tipo in ['var', 'fun']:
+
+        # ignora se for parte de declaração
+        if indice > 0:
+            anterior = self.tokens[indice - 1]
+            if anterior.tipo in ['var', 'fun']:
+                return
+        if self.eh_parametro_declaracao(indice):
             return
-        
-        # Ignora parâmetros em declaração
-        if self.eh_parametro_declaracao(i):
+
+        simbolo = self.tabela.buscar(nome)
+        if simbolo is None:
+            self.erros.append("Linha " + str(linha) + ": '" + nome + "' não declarado")
             return
-        
-        # Verifica se existe
-        sim = self.tabela.buscar(nome)
-        if not sim:
-            self.erros.append(f"Linha {linha}: '{nome}' não declarado")
-            return
-        
-        # Atribuição: marca como inicializada
-        if i < len(self.tokens) - 1 and self.tokens[i + 1].tipo == 'igual':
-            if sim.categoria in ['variavel', 'parametro']:
-                sim.inicializada = True
-        
-        # Read: marca como inicializada
-        elif i > 1 and self.tokens[i - 2].tipo == 'read':
-            if sim.categoria in ['variavel', 'parametro']:
-                sim.inicializada = True
-        
-        # Uso: verifica inicialização
+
+        # x = 5 → marca como inicializada
+        if indice < len(self.tokens) - 1:
+            proximo = self.tokens[indice + 1]
+            if proximo.tipo == 'igual':
+                if simbolo.categoria in ['variavel', 'parametro']:
+                    simbolo.inicializada = True
+
+        # read(x) → também inicializa
+        elif indice > 1:
+            dois_atras = self.tokens[indice - 2]
+            if dois_atras.tipo == 'read':
+                if simbolo.categoria in ['variavel', 'parametro']:
+                    simbolo.inicializada = True
+
+        # uso normal: soma(x,y) ou só x
         else:
-            # Chamada de função: valida argumentos
-            if i < len(self.tokens) - 1 and self.tokens[i + 1].tipo == 'ap':
-                self.validar_chamada_funcao(i)
-            # Uso comum: verifica inicialização
-            elif sim.categoria == 'variavel' and not sim.inicializada:
-                self.avisos.append(f"Linha {linha}: '{nome}' pode não estar inicializada")
-    
-    def eh_parametro_declaracao(self, i):
-        """Verifica se é parâmetro em declaração de função"""
-        if i > 0 and i < len(self.tokens) - 1:
-            if self.tokens[i - 1].tipo in ['ap', 'v'] and self.tokens[i + 1].tipo in ['v', 'fp']:
-                # Procura 'fun' antes
-                j = i - 1
+            if indice < len(self.tokens) - 1:
+                proximo = self.tokens[indice + 1]
+                if proximo.tipo == 'ap':
+                    self.validar_chamada_funcao(indice)
+            elif simbolo.categoria == 'variavel' and not simbolo.inicializada:
+                self.avisos.append("Linha " + str(linha) + ": '" + nome + "' pode não estar inicializada")
+
+    # vê se o id tá dentro de (a, b) na declaração
+    def eh_parametro_declaracao(self, indice):
+        if indice > 0 and indice < len(self.tokens) - 1:
+            anterior = self.tokens[indice - 1]
+            proximo = self.tokens[indice + 1]
+            if anterior.tipo in ['ap', 'v'] and proximo.tipo in ['v', 'fp']:
+                j = indice - 1
                 while j >= 0:
                     if self.tokens[j].tipo == 'fun':
                         return True
                     if self.tokens[j].tipo in ['ab', 'fb', 'pv']:
                         break
-                    j -= 1
+                    j = j - 1
         return False
-    
-    def validar_operacao(self, i):
-        """Valida operação aritmética"""
-        if i > 0 and i < len(self.tokens) - 1:
-            esq = self.tokens[i - 1]
-            dir = self.tokens[i + 1]
-            
-            # Verifica operandos
-            for operando in [esq, dir]:
-                if operando.tipo == 'id':
-                    sim = self.tabela.buscar(operando.lexema)
-                    if sim and sim.categoria == 'funcao':
-                        self.erros.append(
-                            f"Linha {self.tokens[i].pos}: Não pode usar função '{sim.nome}' em operação aritmética"
-                        )
-    
-    def validar_chamada_funcao(self, i):
-        """Valida chamada de função"""
-        nome = self.tokens[i].lexema
-        linha = self.tokens[i].pos
-        sim = self.tabela.buscar(nome)
-        
-        if not sim:
-            return  # Erro já reportado em validar_uso_id
-        
-        if sim.categoria != 'funcao':
-            self.erros.append(f"Linha {linha}: '{nome}' não é uma função")
-            return
-        
-        # Conta argumentos
-        num_args = 0
-        j = i + 2  # Pula 'id' e '('
-        nivel = 0
-        if j < len(self.tokens) and self.tokens[j].tipo != 'fp':
-            num_args = 1
-            while j < len(self.tokens):
-                if self.tokens[j].tipo == 'ap':
-                    nivel += 1
-                elif self.tokens[j].tipo == 'fp':
-                    if nivel == 0:
-                        break
-                    nivel -= 1
-                elif self.tokens[j].tipo == 'v' and nivel == 0:
-                    num_args += 1
-                j += 1
-        
-        if num_args != len(sim.params):
-            self.erros.append(
-                f"Linha {linha}: '{nome}' espera {len(sim.params)} argumento(s), mas recebeu {num_args}"
-            )
 
+    # não pode fazer x + soma()
+    def validar_operacao(self, indice):
+        if indice > 0 and indice < len(self.tokens) - 1:
+            esquerda = self.tokens[indice - 1]
+            direita = self.tokens[indice + 1]
+            operandos = [esquerda, direita]
+            for op in operandos:
+                if op.tipo == 'id':
+                    simbolo = self.tabela.buscar(op.lexema)
+                    if simbolo is not None and simbolo.categoria == 'funcao':
+                        self.erros.append("Linha " + str(self.tokens[indice].pos) + ": função em operação")
+
+    # conta argumentos em soma(x, y)
+    def validar_chamada_funcao(self, indice):
+        nome = self.tokens[indice].lexema
+        linha = self.tokens[indice].pos
+        simbolo = self.tabela.buscar(nome)
+        if simbolo is None or simbolo.categoria != 'funcao':
+            if simbolo is not None:
+                self.erros.append("Linha " + str(linha) + ": '" + nome + "' não é função")
+            return
+
+        num_args = 0
+        j = indice + 2
+        nivel_parenteses = 0
+        
+        if j < len(self.tokens):
+            token = self.tokens[j]
+            if token.tipo != 'fp':
+                num_args = 1
+        
+        while j < len(self.tokens):
+            token = self.tokens[j]
+            if token.tipo == 'ap':
+                nivel_parenteses = nivel_parenteses + 1
+            elif token.tipo == 'fp':
+                if nivel_parenteses == 0:
+                    break
+                nivel_parenteses = nivel_parenteses - 1
+            elif token.tipo == 'v' and nivel_parenteses == 0:
+                num_args = num_args + 1
+            j = j + 1
+
+        if num_args != len(simbolo.params):
+            self.erros.append("Linha " + str(linha) + ": '" + nome + 
+                            "' espera " + str(len(simbolo.params)) + 
+                            " arg(s), recebeu " + str(num_args))
+
+
+# teste completo
 def main():
     print("=" * 80)
-    print("COMPILADOR COMPLETO")
+    print("COMPILADOR")
     print("=" * 80)
-    
+
     codigo_teste = """
     var x;
     var y;
@@ -350,16 +379,14 @@ def main():
     write(y);
     soma(x, y);
     """
-    
+
     print("\nCódigo:")
     print(codigo_teste)
-    
+
     try:
-        # Léxico
         print("\n" + "=" * 80)
-        print("ANÁLISE LÉXICA")
+        print("LÉXICA")
         print("=" * 80)
-        
         lex = Lexico()
         lex.definir_entrada(codigo_teste)
         tokens = []
@@ -368,27 +395,21 @@ def main():
             if tk.tipo == '$':
                 break
             tokens.append(tk)
-        
-        print(f" {len(tokens)} tokens identificados")
-        
-        # Sintático
+        print(" " + str(len(tokens)) + " tokens")
+
         print("\n" + "=" * 80)
-        print("ANÁLISE SINTÁTICA SLR")
+        print("SINTÁTICA")
         print("=" * 80)
         slr = SLR()
         slr.analisar(tokens)
-        
-        # Semântico
-        semantico = AnalisadorSemantico()
-        resultado = semantico.analisar(tokens)
-        
-        if resultado:
+
+        sem = AnalisadorSemantico()
+        if sem.analisar(tokens):
             print("\n" + "=" * 80)
-            print(" COMPILAÇÃO CONCLUÍDA COM SUCESSO!")
+            print(" OK")
             print("=" * 80)
-        
     except Exception as e:
-        print(f"\n Erro: {e}")
+        print("\n ERRO: " + str(e))
 
 if __name__ == "__main__":
     main()
